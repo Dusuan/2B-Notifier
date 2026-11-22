@@ -26,15 +26,17 @@ Este documento mantiene un registro cronológico del progreso, decisiones tomada
 
 **Archivos:** creados `agent/*`, `bot/*`, `tools/build_game_data.py`, `data/game_data.json`, `cli.py`, `tests/*`, `.dockerignore`; modificados `main.py`, `config.py`, `requirements.txt`, `Dockerfile`, `docker-compose.yml`, `.gitignore`, `.env.example`, `test_alert.py`, `alerts/*.py`, `scrapers/{amazon,costco,pricing}.py`, `CLAUDE.md`, `SPEC.md`, `REFERENCES.md`, `README.md`, `WORKLOG.md`.
 
-**Git:** commits `16466ed` (build datos), `d16ca48` (agente), `13dd62f` (bot + orquestador), `babbe0b` (rebrand), `66aa99a` (docs), más el commit de CD de esta entrada. Repo GitHub renombrado a `Dusuan/2B-Notifier` (ver nota abajo). **No se hizo `git push`.**
+**Git:** commits `16466ed` (build datos), `d16ca48` (agente), `13dd62f` (bot + orquestador), `babbe0b` (rebrand), `66aa99a` (docs), `fb17402` (CD), `449a76b` (fix: `COC_PLAYER_TAG` del .env si el perfil no tiene tag) y este commit de worklog. Repo GitHub renombrado a `Dusuan/2B-Notifier`. `git push` de `8dab532..fb17402` con aprobación del usuario; `449a76b` y posteriores quedan locales hasta nueva aprobación.
 
-**Cambios fuera del repo:** `gcloud auth login` hecho por el usuario; `gcloud config set project pokebot-512120` (VM `pokenotify-worker`, us-central1-c, IP efímera 34.63.27.32). gcloud CLI 594.0.1 instalado en `~/.local/google-cloud-sdk` (sin sudo, sin tocar rc de shell); MCP `gcloud` (`@google-cloud/gcloud-mcp`) registrado con `claude mcp add gcloud -s local` (en `~/.claude.json`, sólo este proyecto); `.venv/` local (ignorado por git).
+**Despliegue en la VM (`pokenotify-worker`, usuario `dusuanchancloso6`, `~/Pokenotify`):** `git remote set-url` a 2B-Notifier, `git pull --ff-only` a `fb17402`, `docker compose build` (8m33s), 13 tests OK dentro de la imagen, `docker compose up -d --remove-orphans` (eliminó `pokenotify-worker`, arrancó `2b-notifier`). Logs: alerta de prueba enviada, bot conectado como `@tcgpokedus_bot`, noticias refrescadas (6). Cron de autodeploy instalado (`*/5`, log en `~/2b-notifier-deploy.log`); corrida manual sin cambios OK.
 
-**No verificado / omitido:** build de la imagen Docker (Docker Desktop no estaba corriendo); llamadas reales a Gemini y a la API de CoC (no hay llaves locales). Bug preexistente sin tocar: `alerts/twilio_client.py` llama `config.validate_twilio()`, que no existe en `Config` (Twilio nunca se inicializa).
+**Cambios fuera del repo:** `gcloud compute ssh` generó `~/.ssh/google_compute_engine` local y subió la llave pública a la metadata del proyecto `pokebot-512120`; la primera conexión creó por error un usuario nuevo `dusuan` en la VM (sin repo ni docker; se puede borrar con `sudo userdel -r dusuan`). `gcloud auth login` hecho por el usuario; `gcloud config set project pokebot-512120` (VM `pokenotify-worker`, us-central1-c, IP efímera 34.63.27.32). gcloud CLI 594.0.1 instalado en `~/.local/google-cloud-sdk` (sin sudo, sin tocar rc de shell); MCP `gcloud` (`@google-cloud/gcloud-mcp`) registrado con `claude mcp add gcloud -s local` (en `~/.claude.json`, sólo este proyecto); `.venv/` local (ignorado por git).
+
+**No verificado / omitido:** build local de Docker (Docker Desktop apagado; sí se verificó en la VM); llamadas reales a Gemini y a la API de CoC (no hay llaves locales). Bug preexistente sin tocar: `alerts/twilio_client.py` llama `config.validate_twilio()`, que no existe en `Config` (Twilio nunca se inicializa).
 
 **Próximos pasos:**
-1. `git push`, luego en la VM: `git remote set-url`, `git pull`, agregar `GEMINI_API_KEY`, `COC_API_TOKEN`, `COC_PLAYER_TAG` al `.env`, `docker-compose down && docker-compose up -d --build --remove-orphans`.
-2. En la VM: `bash deploy/install_autodeploy.sh` para activar el CD.
+1. Usuario: cargar `GEMINI_API_KEY`, `COC_API_TOKEN`, `COC_PLAYER_TAG` con el script de prompt oculto (`set_secrets.sh`).
+2. `git push` de `449a76b` → primera prueba real del CD (mensaje 🚀 en Telegram).
 3. Crear alerta de presupuesto en Billing.
 4. Decidir si arreglar `validate_twilio`.
 
