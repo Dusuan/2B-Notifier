@@ -42,6 +42,9 @@ def _load() -> dict:
             state[key].update(value)
         else:
             state[key] = value
+    # Si el usuario no ha guardado tag con /start, usar COC_PLAYER_TAG del .env (puede agregarse después)
+    if not state["profile"].get("player_tag"):
+        state["profile"]["player_tag"] = config.coc_player_tag
     return state
 
 
