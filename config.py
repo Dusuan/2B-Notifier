@@ -13,7 +13,7 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
-logger = logging.getLogger("Pokenotify")
+logger = logging.getLogger("2B-Notifier")
 
 
 @dataclass
@@ -44,6 +44,25 @@ class Config:
     msrp_cushion_percent: float = float(os.getenv("MSRP_CUSHION_PERCENT", "25.0"))
     amazon_only_official_seller: bool = os.getenv("AMAZON_ONLY_OFFICIAL_SELLER", "true").strip().lower() in ("true", "1", "yes")
     send_startup_test_alert: bool = os.getenv("SEND_STARTUP_TEST_ALERT", "true").strip().lower() in ("true", "1", "yes")
+    # --- Agente IA (Gemini free tier) ---
+    gemini_api_key: str = os.getenv("GEMINI_API_KEY", "").strip()
+    gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite").strip()
+    gemini_daily_limit: int = int(os.getenv("GEMINI_DAILY_LIMIT", "400"))
+    agent_max_iterations: int = int(os.getenv("AGENT_MAX_ITERATIONS", "5"))
+
+    # --- Clash of Clans API (llave atada a la IP de la VM) ---
+    coc_api_token: str = os.getenv("COC_API_TOKEN", "").strip()
+    coc_api_base: str = os.getenv("COC_API_BASE", "https://api.clashofclans.com/v1").strip().rstrip("/")
+    coc_player_tag: str = os.getenv("COC_PLAYER_TAG", "").strip()
+    player_cache_minutes: int = int(os.getenv("PLAYER_CACHE_MINUTES", "20"))
+    news_refresh_hours: float = float(os.getenv("NEWS_REFRESH_HOURS", "6"))
+
+    # --- Bot interactivo de Telegram ---
+    # IDs de usuario de Telegram permitidos (coma). Si está vacío usa TELEGRAM_CHAT_ID.
+    telegram_allowed_user_ids: List[int] = None
+    enable_pokemon_monitor: bool = os.getenv("ENABLE_POKEMON_MONITOR", "true").strip().lower() in ("true", "1", "yes")
+    state_file: str = os.getenv("STATE_FILE", "state/state.json").strip()
+
     amazon_asins: List[str] = None
     tcg_keywords: List[str] = None
     tcg_exclude_keywords: List[str] = None
@@ -51,6 +70,9 @@ class Config:
     def __post_init__(self):
         raw_asins = os.getenv("AMAZON_ASINS", "B0CQV49Z5X,B0DFZ2M1R6")
         self.amazon_asins = [asin.strip() for asin in raw_asins.split(",") if asin.strip()]
+
+        raw_ids = os.getenv("TELEGRAM_ALLOWED_USER_IDS", "").strip() or self.telegram_chat_id
+        self.telegram_allowed_user_ids = [int(x) for x in raw_ids.split(",") if x.strip().lstrip("-").isdigit()]
 
         # Palabras que identifican cartas Pokémon TCG
         default_tcg = "tcg,carta,cartas,card,cards,elite trainer,etb,booster,sobre,sobres,caja de entrenador,coleccion,colección,lata,tin,baraja,deck,bundle,paquete de mejora,paquete coleccionable"

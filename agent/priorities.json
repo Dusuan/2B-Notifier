@@ -1,0 +1,20 @@
+{
+  "_doc": "Reglas de prioridad del calculador de mejoras (agent/upgrade_plan.py). Edita libremente y reinicia el contenedor.",
+  "category_order": {
+    "farming": ["heroes", "pets", "troops", "spells", "siege", "equipment"],
+    "war":     ["heroes", "equipment", "pets", "troops", "spells", "siege"],
+    "trophy":  ["heroes", "equipment", "troops", "spells", "pets", "siege"]
+  },
+  "queues": {
+    "hero_hall":  ["heroes"],
+    "laboratory": ["troops", "spells", "siege"],
+    "pet_house":  ["pets"],
+    "blacksmith": ["equipment"]
+  },
+  "focus_units": [],
+  "next_th": {
+    "heroes_must_be_maxed": true,
+    "min_offense_completion_pct": 85
+  },
+  "max_items": 8
+}
