@@ -5,7 +5,7 @@ from typing import Optional
 from config import config
 from .twilio_client import send_whatsapp as send_twilio_whatsapp
 
-logger = logging.getLogger("Pokenotify.Alerts")
+logger = logging.getLogger("2B-Notifier.Alerts")
 
 
 def send_telegram_alert(message_text: str, buttons: Optional[list] = None) -> bool:

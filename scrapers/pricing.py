@@ -3,7 +3,7 @@ import logging
 import requests
 from typing import Tuple, Optional, Dict
 
-logger = logging.getLogger("Pokenotify.Pricing")
+logger = logging.getLogger("2B-Notifier.Pricing")
 
 # Catálogo oficial de MSRP en USD según tipo de producto Pokémon TCG
 # Formato: (identificador, nombre_despliegue, msrp_usd, lista_palabras_clave)

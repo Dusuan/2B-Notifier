@@ -40,3 +40,6 @@ env/
 
 # Docker
 .docker/
+
+# Estado local del agente (perfil, caché, contador)
+state/

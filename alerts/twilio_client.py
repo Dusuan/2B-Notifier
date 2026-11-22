@@ -2,7 +2,7 @@ import logging
 from typing import Optional
 from config import config
 
-logger = logging.getLogger("Pokenotify.Alerts")
+logger = logging.getLogger("2B-Notifier.Alerts")
 
 # Cliente Twilio inicializado perezosamente (lazy loading)
 _twilio_client = None

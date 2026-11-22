@@ -8,7 +8,7 @@ from .models import ScrapedItem
 from .utils import get_random_headers, parse_price
 from .pricing import evaluate_product_msrp
 
-logger = logging.getLogger("Pokenotify.Costco")
+logger = logging.getLogger("2B-Notifier.Costco")
 
 COSTCO_SEARCH_URL = "https://www.costco.com.mx/search?text=pokemon"
 COSTCO_BASE_URL = "https://www.costco.com.mx"

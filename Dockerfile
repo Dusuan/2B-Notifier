@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 # Evitar buffers en logs y generación de bytecode .pyc
 ENV PYTHONUNBUFFERED=1 \
@@ -19,7 +19,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Crear y cambiar a usuario sin privilegios para ejecución segura
-RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+# state/ guarda perfil, caché de noticias y contador de IA (montado como volumen)
+RUN useradd -m -u 1000 appuser && mkdir -p /app/state && chown -R appuser:appuser /app
 USER appuser
 
 CMD ["python", "main.py"]

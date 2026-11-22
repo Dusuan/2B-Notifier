@@ -1,11 +1,11 @@
 version: '3.8'
 
 services:
-  pokenotify:
+  notifier:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: pokenotify-worker
+    container_name: 2b-notifier
     restart: unless-stopped
     env_file:
       - .env
@@ -14,3 +14,11 @@ services:
       # Fallbacks si no están en .env
       - CHECK_INTERVAL_SECONDS=${CHECK_INTERVAL_SECONDS:-90}
       - MAX_MSRP_PRICE_MXN=${MAX_MSRP_PRICE_MXN:-1600.0}
+      - STATE_FILE=/app/state/state.json
+    volumes:
+      # Persistencia del perfil, notas, caché de noticias y contador diario de Gemini
+      - notifier_state:/app/state
+    mem_limit: 400m
+
+volumes:
+  notifier_state:

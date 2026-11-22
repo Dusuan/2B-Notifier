@@ -8,7 +8,7 @@ from .models import ScrapedItem
 from .utils import get_random_headers, parse_price
 from .pricing import evaluate_product_msrp
 
-logger = logging.getLogger("Pokenotify.Amazon")
+logger = logging.getLogger("2B-Notifier.Amazon")
 
 
 def extract_amazon_seller_info(soup: BeautifulSoup) -> Tuple[str, str, bool]:
