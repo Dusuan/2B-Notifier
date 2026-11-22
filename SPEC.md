@@ -1,127 +1,131 @@
 # Especificaciones del Proyecto (SPEC.md)
 
-Este documento es la fuente única de verdad para los requerimientos, la arquitectura y el diseño del sistema **Pokenotify**.
+Este documento es la fuente única de verdad para los requerimientos, la arquitectura y el diseño del sistema **2B-Notifier** (antes *Pokenotify*).
 
 ---
 
 ## 1. Visión General
-**Pokenotify** es un bot de monitoreo en segundo plano (Worker) escrito en Python que rastrea constantemente el inventario y precios de artículos de alta demanda de Pokémon TCG (como las Elite Trainer Boxes de 30 Aniversario y colecciones especiales) en **Costco México** y **Amazon México**. Al detectar stock a precio regular (MSRP) o vendido directamente por tiendas oficiales, envía alertas instantáneas por **WhatsApp** mediante la API de **Twilio**.
+**2B-Notifier** es un bot personal de Telegram + agente de IA que corre 24/7 y le envía a su único usuario las notificaciones que él considera relevantes, y además conversa con él usando herramientas deterministas:
+
+1. **Monitor Pokémon TCG** (módulo original de Pokenotify): rastrea stock y precios de productos Pokémon TCG en inglés en **Costco México** y **Amazon México** y alerta cuando hay stock a MSRP (+colchón).
+2. **Agente Clash of Clans**: optimiza la cuenta del usuario (progreso de TH, orden de mejoras, héroes/tropas/equipo) con datos reales de la API oficial y cálculos en código.
+3. **Noticias oficiales de Clash of Clans**: lee el blog de Supercell, responde "¿qué hay de nuevo?" y hace push de posts nuevos.
+
+El usuario decide qué recibe: puede activar/desactivar cada tipo de push desde el chat ("deja de mandarme noticias de CoC").
+
+Origen del diseño: `HANDOFF.md` (agente CoC con Gemini free tier). Decisiones tomadas el 2026-11-22: hosting en la VM existente (no Cloud Run), reutilizar el bot de Telegram existente, docs en español, repo renombrado a `2B-Notifier`.
 
 ---
 
 ## 2. Arquitectura del Sistema
-- **Tipo de Aplicación**: Proceso demonio / Worker en segundo plano (bucle infinito con intervalos aleatorios/jitter y cooldown anti-spam).
-- **Lenguaje y Entorno**: Python 3.11 (`python:3.11-slim`).
-- **Contenedor**: Docker + Docker Compose.
-- **Librerías Clave**:
-  - `requests`: Peticiones HTTP sincrónicas configuradas con cabeceras de emulación de navegador y rotación de User-Agents.
-  - `beautifulsoup4` (`bs4`): Parseo y extracción de datos del árbol DOM HTML.
-  - `twilio`: Integración oficial con la API REST de Twilio WhatsApp.
-  - `python-dotenv`: Carga de configuración y credenciales desde archivos `.env`.
+
+```text
+Usuario en Telegram
+   │  (long polling getUpdates — la VM corre 24/7, no se necesita webhook)
+   ▼
+VM e2-micro GCP (Docker, contenedor "2b-notifier")
+ main.py
+   ├── Hilo principal: bot/telegram_bot.py
+   │     ├── allowlist TELEGRAM_ALLOWED_USER_IDS (ignora a cualquier otro)
+   │     ├── comandos deterministas /start /status /next /news /pokemon (0 llamadas a IA)
+   │     └── texto libre → agent/core.answer(user_id, msg)
+   │            └── bucle Gemini (google-genai, function calling manual, máx 5 iteraciones)
+   │                  └── agent/tools.py (6 herramientas)
+   │                        ├── get_player        → API oficial CoC (caché 20 min)
+   │                        ├── get_upgrade_plan  → agent/upgrade_plan.py (sin LLM) + data/game_data.json
+   │                        ├── get_latest_news   → agent/news.py (blog Supercell, caché 6 h)
+   │                        ├── get_pokemon_status→ estado del último escaneo
+   │                        ├── get_profile
+   │                        └── update_profile    → tag, estilo, metas, notas, preferencias de push
+   ├── Hilo "pokemon": scrapers Costco/Amazon cada ~90 s con jitter → alerts.dispatch_alert
+   ├── Hilo "news": refresca noticias cada NEWS_REFRESH_HOURS → push de posts nuevos
+   └── agent/store.py → state/state.json (volumen Docker)
+```
+
+### Principios de diseño (el modelo es pequeño)
+1. **El código piensa, la IA habla**: topes por TH, costos, tiempos, prioridades y veredicto de "subir de TH" se calculan en Python.
+2. **Pocas herramientas gruesas** (6) con descripciones cortas y salidas JSON compactas.
+3. **Topes duros**: `AGENT_MAX_ITERATIONS` (5) llamadas al modelo por mensaje, `GEMINI_DAILY_LIMIT` (400/día, reinicio a medianoche del Pacífico), timeouts en todas las peticiones, 429 → mensaje amable.
+4. **Caché agresiva**: jugador 20 min, noticias 6 h, datos estáticos al iniciar.
+5. **Respuestas fundamentadas**: el prompt de sistema obliga a responder sólo con resultados de herramientas, decir "no lo sé" si falta el dato y citar título/fecha/enlace en noticias.
 
 ---
 
-## 3. Flujo Lógico del Bot (Pipeline)
+## 3. Componentes
 
-```text
-       ┌────────────────────────┐
-       │     Inicio / Loop      │
-       └───────────┬────────────┘
-                   ▼
-       ┌────────────────────────┐
-       │   Carga Config / Env   │
-       └───────────┬────────────┘
-                   ▼
-     ┌─────────────┴─────────────┐
-     ▼                           ▼
-┌──────────────┐          ┌──────────────┐
-│ Scraper      │          │ Scraper      │
-│ Costco México│          │ Amazon México│
-└──────┬───────┘          └──────┬───────┘
-       │ Extracción stock        │ Extracción stock
-       │ y validación MSRP       │ y validación MSRP
-       └─────────────┬───────────┘
-                     ▼
-           ¿Hay Stock en MSRP?
-             /             \
-          [Sí]             [No]
-           /                 \
-          ▼                   ▼
-┌──────────────────┐    ┌──────────────────┐
-│ Envío de Alerta  │    │ Espera / Jitter  │
-│ Twilio WhatsApp  │    │ (e.g. 60-120 seg)│
-└─────────┬────────┘    └────────┬─────────┘
-          │                      │
-          └───────────┬──────────┘
-                      ▼
-             Siguiente Iteración
-```
+### 3.1 API de Clash of Clans (`agent/coc_api.py`)
+- `GET {COC_API_BASE}/players/{tag}` con `Authorization: Bearer COC_API_TOKEN`.
+- Las llaves de CoC están atadas a IPs. Como corre en la VM (IP pública estable), basta crear la llave con la IP de la VM. Si la IP cambia: regenerar la llave o usar el proxy de RoyaleAPI vía `COC_API_BASE` (ver `REFERENCES.md`).
+- Limitación: la API no expone niveles de edificios/defensas/muros; el plan lo indica explícitamente.
 
-1. **Inicialización**: Lectura de variables de entorno y validación de credenciales Twilio (con fallback en modo log si no están definidas).
-2. **Ciclo de Inspección (Costco México)**:
-   - Consulta el catálogo de Pokémon en Costco México.
-   - Detecta tarjetas de producto, descarta ítems agotados (`out-of-stock`), valida títulos relevantes y evalúa precio vs umbral MSRP.
-   - Maneja códigos HTTP 403 (WAF Akamai) y 503 sin interrumpir la ejecución.
-3. **Ciclo de Inspección (Amazon México)**:
-   - Itera sobre los ASINs configurados en `AMAZON_ASINS`.
-   - Extrae disponibilidad (`#availability`), precio (`.a-price`) y vendedor (`#merchant-info`).
-   - Descarta revendedores que inflen el precio sobre el MSRP.
-   - Maneja bloqueos WAF (403), sobrecargas (503) y retos CAPTCHA.
-4. **Despacho de Alertas y Cooldown**:
-   - Si se detecta producto disponible con precio objetivo, se envía notificación detallada por WhatsApp con link directo de compra.
-   - Cuenta con una caché de cooldown (1 hora por defecto) para evitar re-enviar la misma alerta repetitivamente mientras haya stock.
-5. **Espera Adaptativa y Señales**:
-   - Duerme durante un intervalo parametrizable con jitter aleatorio (`+ / - 10s`).
-   - Atrapa `SIGINT` y `SIGTERM` para apagado controlado y limpio.
+### 3.2 Calculador de mejoras (`agent/upgrade_plan.py`, `agent/priorities.json`)
+- Tope por TH = mayor nivel cuyo TH requerido ≤ TH del jugador (héroes vía Hero Hall, equipo vía Blacksmith).
+- Salida: % de avance por categoría, siguiente mejora por cola (Hero Hall, Laboratorio, Pet House, Blacksmith), top de prioridades con costo/tiempo restante, veredicto `ready_for_next_th` con bloqueadores.
+- Reglas editables en `priorities.json`: orden de categorías por estilo (`farming`/`war`/`trophy`), `focus_units`, héroes al tope y % mínimo de ofensiva para subir de TH.
+
+### 3.3 Datos estáticos (`data/game_data.json`)
+- Generado por `tools/build_game_data.py` desde [chiefpansancolt/clash-of-clans-data](https://github.com/chiefpansancolt/clash-of-clans-data), fijado al commit `7afaa03` (2026-11-06, incluye el balance de octubre 2026).
+- Formato compacto por unidad: `[nivel, th_requerido, costo, recurso, segundos]`.
+
+### 3.4 Noticias (`agent/news.py`)
+- No existe RSS oficial. La página del blog es Next.js: los artículos vienen en `<script id="__NEXT_DATA__">` (`props.pageProps.articles[]` con `title`, `linkUrl`, `publishDate`).
+- Resumen = `openGraph.description` oficial de cada artículo (sin gastar cuota de IA). Se cachean ~10 posts y las URLs vistas; en el primer arranque no se notifica el histórico.
+
+### 3.5 Monitor Pokémon TCG (`scrapers/`, `alerts/`)
+- Sin cambios funcionales respecto a Pokenotify: filtro TCG en inglés, MSRP dinámico con colchón (`MSRP_CUSHION_PERCENT`), sólo vendedor Amazon México, cooldown de 12 h, botones 1-Click, manejo de 403/503/CAPTCHA.
+- Nuevo: registra el último escaneo y las alertas en el store y respeta la preferencia `notify.pokemon_stock`.
+
+### 3.6 Bot de Telegram (`bot/telegram_bot.py`)
+- Bot API directa con `requests` (decisión: evita dependencias; long polling basta en una VM 24/7). Al iniciar llama `deleteWebhook`.
+- Indicador "escribiendo…" mientras el agente trabaja, mensajes en texto plano partidos a ≤4000 caracteres.
 
 ---
 
 ## 4. Esquema de Variables de Entorno (.env)
 
-| Variable | Tipo | Requerido | Descripción | Ejemplo |
-|---|---|---|---|---|
-| `TWILIO_SID` | String | Sí | Account SID de la consola de Twilio | `ACXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX` |
-| `TWILIO_AUTH` | String | Sí | Auth Token de Twilio | `your_auth_token_here` |
-| `TWILIO_FROM` | String | Sí | Número remitente de Twilio (Sandbox o Producción) | `whatsapp:+14155238886` |
-| `TWILIO_TO` | String | Sí | Número destinatario que recibirá las alertas | `whatsapp:+52155XXXXXXXX` |
-| `CHECK_INTERVAL_SECONDS` | Entero | No | Intervalo base de espera entre rondas de scraping (default: 90) | `90` |
-| `AMAZON_ASINS` | String | No | Lista de ASINs de Amazon separados por coma | `B0CQV49Z5X,B0DFZ2M1R6` |
-| `MAX_MSRP_PRICE_MXN` | Float | No | Precio máximo en MXN para considerar compra razonable (default: 1600.0) | `1600.0` |
+| Variable | Requerido | Descripción | Default |
+|---|---|---|---|
+| `TELEGRAM_BOT_TOKEN` | Sí | Token del bot (@BotFather) | — |
+| `TELEGRAM_CHAT_ID` | Sí | Chat privado del usuario (destino de los push) | — |
+| `TELEGRAM_ALLOWED_USER_IDS` | No | IDs de usuario permitidos (coma) | `TELEGRAM_CHAT_ID` |
+| `GEMINI_API_KEY` | Para el chat IA | Llave de Google AI Studio (free tier) | — |
+| `GEMINI_MODEL` | No | Modelo Gemini (verificar vigencia en la doc oficial) | `gemini-3.5-flash-lite` |
+| `GEMINI_DAILY_LIMIT` | No | Tope propio de llamadas al modelo por día | `400` |
+| `AGENT_MAX_ITERATIONS` | No | Máx. llamadas al modelo por mensaje | `5` |
+| `COC_API_TOKEN` | Para CoC | Llave de developer.clashofclans.com (IP de la VM) | — |
+| `COC_PLAYER_TAG` | No | Tag inicial (también se guarda con `/start #TAG`) | — |
+| `COC_API_BASE` | No | Base de la API (o proxy RoyaleAPI) | `https://api.clashofclans.com/v1` |
+| `PLAYER_CACHE_MINUTES` | No | Caché del jugador | `20` |
+| `NEWS_REFRESH_HOURS` | No | Frecuencia de refresco/push de noticias | `6` |
+| `ENABLE_POKEMON_MONITOR` | No | Encender/apagar el monitor Pokémon | `true` |
+| `STATE_FILE` | No | Ruta del JSON persistente | `state/state.json` (Docker: `/app/state/state.json`) |
+| `CHECK_INTERVAL_SECONDS`, `ALERT_COOLDOWN_HOURS`, `AMAZON_ASINS`, `MAX_MSRP_PRICE_MXN`, `MSRP_CUSHION_PERCENT`, `AMAZON_ONLY_OFFICIAL_SELLER`, `SEND_STARTUP_TEST_ALERT` | No | Parámetros del monitor Pokémon (ver `.env.example`) | — |
+| `DISCORD_WEBHOOK_URL`, `CALLMEBOT_*`, `TWILIO_*` | No | Canales extra de alertas Pokémon | — |
 
 ---
 
-## 5. Estrategia de Despliegue (Investigación y Comparativa)
-
-El bot requiere ejecutarse como un **Worker persistente 24/7** (un proceso continuo sin servidor HTTP entrante). A continuación se analiza la viabilidad en diferentes plataformas:
-
-| Plataforma | Soporte Worker Continuo Gratuito | Requiere Puerto HTTP | Limitaciones / Consideraciones de Capa Gratuita | Recomendación |
-|---|---|---|---|---|
-| **Render** | ❌ No en Free Tier para Background Workers | Sí (en Web Services) | Los *Background Workers* en Render son exclusivamente de pago (\$7 USD/mes mínimo). Los *Web Services* gratuitos se suspenden tras 15 minutos sin peticiones HTTP entrantes y tienen un límite de 750 horas/mes compartidas. Correrlo gratis en Render requeriría añadir un mini-servidor HTTP (e.g. FastAPI / Flask) y un servicio de ping externo (como UptimeRobot o Cron-Job.org), lo cual añade complejidad innecesaria. | No recomendado salvo con workaround HTTP |
-| **Oracle Cloud (OCI)** | ✅ Sí (Always Free) | ❌ No | Ofrece hasta 4 OCPUs y 24 GB de RAM en instancias ARM Ampere A1 (o 2 instancias AMD Micro de 1 GB) completamente gratis para siempre. Permite correr Docker y systemd sin restricciones ni suspensiones de inactividad. | **Opción Nube #1 (Recomendada si se desea hostear fuera de casa)** |
-| **Fly.io** | ⚠️ Parcial / Limitado | ❌ No | Requiere tarjeta de crédito para registrarse. El esquema de free tier cambió a créditos mensuales limitados y suspende máquinas inactivas o cuando se consumen las cuotas. | Opción secundaria |
-| **Despliegue Local (Linux / Hyprland / K8s)** | ✅ Excelente y 100% bajo control | ❌ No | El usuario ya cuenta con entorno Linux, Hyprland y Kubernetes local. Ejecutar el contenedor mediante `docker-compose up -d` en segundo plano o como Deployment de K8s no genera costos, no sufre suspensiones por inactividad y permite inspeccionar logs de inmediato con `docker-compose logs -f`. | **Opción Inmediata y más confiable para desarrollo y uso diario** |
-
-**Conclusión y Hoja de Ruta de Despliegue:**
-1. **Entorno Primario / Local**: Correr mediante Docker Compose (`docker-compose up -d --build`) o Kubernetes local con reinicio automático (`restart: unless-stopped`).
-2. **Entorno Nube Gratuito 24/7**: Si se requiere dejar la máquina local apagada, desplegar el contenedor en una VM **Oracle Cloud Always Free (ARM Ampere / Ubuntu Linux)** mediante Docker y systemd.
+## 5. Estrategia de Despliegue
+- **Decisión (2026-11-22)**: reutilizar la VM **e2-micro Always Free** de GCP donde ya corría Pokenotify, con `docker compose`.
+  - Resuelve el bloqueo de IP de la API de CoC (IP pública estable de la VM, sin Cloud NAT ni proxy).
+  - Permite long polling y el bucle continuo del monitor Pokémon (Cloud Run escala a cero y requeriría webhook + Cloud Scheduler).
+  - Costo esperado: $0/mes. Red de seguridad: alerta de presupuesto en Billing.
+- Alternativa documentada pero no implementada: Cloud Run + webhook + Secret Manager + Cloud Scheduler (ver `HANDOFF.md`).
+- Guía paso a paso: `README.md` → "Despliegue en la VM de Google Cloud".
 
 ---
 
 ## 6. Estado de Implementación (Hitos)
 
-### Fase 1: Inicialización y Documentación Base
-- [x] Repositorio Git inicializado.
-- [x] Documentación base creada (`REFERENCES.md`, `SPEC.md`, `WORKLOG.md`, `CLAUDE.md`).
-- [x] Estrategia de despliegue investigada y documentada.
+### Fases 1–4 (Pokenotify, 2026-10-19/20)
+- [x] Monitor Pokémon TCG (Costco/Amazon MX), alertas Telegram/Discord/CallMeBot/Twilio, Docker, VM GCP.
 
-### Fase 2: Implementación de Código
-- [x] Dependencias y manejo de entorno (`requirements.txt`, `.env.example`, `config.py`).
-- [x] Módulo de alertas Twilio WhatsApp (`alerts/twilio_client.py`).
-- [x] Scraper de Amazon México con manejo de WAF (`scrapers/amazon.py`).
-- [x] Scraper de Costco México con catálogo y detección de stock (`scrapers/costco.py`).
-- [x] Orquestador / Loop principal con jitter, cooldown y señales (`main.py`).
-
-### Fase 3: Contenerización
-- [x] `Dockerfile` optimizado (`python:3.11-slim`, `PYTHONUNBUFFERED=1`, usuario no root).
-- [x] `docker-compose.yml` para despliegue y variables de entorno.
-- [x] Pruebas locales y verificación de ejecución.
+### Fase 5: 2B-Notifier (2026-11-22)
+- [x] Rebrand a 2B-Notifier (código, Docker, docs).
+- [x] Datos estáticos CoC + generador (`tools/build_game_data.py`).
+- [x] Calculador de mejoras determinista + reglas editables + tests unitarios.
+- [x] Fetcher de noticias del blog de Supercell + caché + push de posts nuevos.
+- [x] Store persistente (perfil, notas, preferencias de notificación, contador IA).
+- [x] Agente Gemini con 6 herramientas, topes duros y CLI local (`cli.py`).
+- [x] Bot interactivo de Telegram con allowlist y comandos.
+- [ ] Despliegue en la VM con llaves reales (Gemini, CoC) y verificación en Telegram.
+- [ ] Opcional: niveles de edificios vía exportación de aldea.

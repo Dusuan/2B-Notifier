@@ -1,6 +1,6 @@
 # Referencias y Patrones de Arquitectura (REFERENCES.md)
 
-Este documento centraliza configuraciones de referencia, snippets de código, selectores, ASINs de prueba, enlaces de documentación y estrategias anti-baneo / evasión de WAF para el bot **Pokenotify**.
+Este documento centraliza configuraciones de referencia, snippets de código, selectores, ASINs de prueba, enlaces de documentación y estrategias anti-baneo / evasión de WAF para **2B-Notifier** (antes Pokenotify).
 
 ---
 
@@ -165,3 +165,53 @@ Para mantener el worker corriendo 24/7 en AWS de forma gratuita:
    docker compose logs -f
    ```
 
+
+---
+
+## 7. Agente IA y Clash of Clans (2B-Notifier, verificado 2026-11-22)
+
+### Gemini API (free tier)
+- Modelos y estado: https://ai.google.dev/gemini-api/docs/models (ahora redirige a `aistudio.google.com/docs/models`).
+  - Estables con free tier al 2026-11-22: `gemini-3.8-flash`, `gemini-3.6-flash`, `gemini-3.5-flash-lite`, `gemini-3.1-flash-lite`. Default del proyecto: `gemini-3.5-flash-lite`.
+  - `gemini-2.5-flash` enruta a `gemini-3.5-flash-lite` desde 2026-12-01. No hardcodear: usar `GEMINI_MODEL`.
+  - Los límites RPM/RPD del free tier se ven en AI Studio → Rate limits (son por proyecto y cambian). Reportes de oct-2026: Flash-Lite ~15 RPM / 500 RPD; 3.8 Flash ~5 RPM / 20 RPD.
+- SDK `google-genai` (v3.6.1). Function calling manual:
+```python
+from google import genai
+from google.genai import types
+client = genai.Client(api_key=KEY)
+cfg = types.GenerateContentConfig(
+    system_instruction=PROMPT,
+    tools=[types.Tool(function_declarations=[types.FunctionDeclaration(
+        name="get_player", description="...", parameters_json_schema={"type": "object", "properties": {}})])],
+    automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True))
+resp = client.models.generate_content(model=MODEL, contents=contents, config=cfg)
+for fc in resp.function_calls or []:
+    part = types.Part.from_function_response(name=fc.name, response={"result": run(fc.name, fc.args)})
+# errores: google.genai.errors.APIError (.code == 429 → cuota)
+```
+
+### Clash of Clans API
+- Portal: https://developer.clashofclans.com (crear llave con la IP pública de la VM: `curl -s ifconfig.me` en la VM).
+- Endpoint: `GET https://api.clashofclans.com/v1/players/%23TAG` + `Authorization: Bearer <token>`. 403 = llave inválida o IP no permitida.
+- Si la IP cambia y no se quiere regenerar la llave: proxy de RoyaleAPI para IPs dinámicas (obtener URL base e IP actuales desde https://docs.royaleapi.com y su Discord; no hardcodear de memoria) y apuntar `COC_API_BASE`.
+- `coc.py` (v4.0.0) trae datos de juego de coc.guide, pero requiere login con email/contraseña; no se usa para evitar dependencias y credenciales extra.
+
+### Datos estáticos del juego
+- Dataset: https://github.com/chiefpansancolt/clash-of-clans-data (`data/home/{heroes,troops,spells,pets,siege-machines,hero-equipment}/*.json`).
+  - Tropas/hechizos/máquinas/mascotas: `levels[].townHallRequired`. Héroes: `levels[].heroHallLevelRequired` → `army-buildings/hero-hall.json`. Equipo: `levels[].blacksmithLevelRequired` → `army-buildings/blacksmith.json`.
+- Regenerar tras cada update del juego: `python tools/build_game_data.py --ref main` (luego fijar el nuevo SHA en `PINNED_REF`).
+
+### Blog oficial de Supercell (sin RSS)
+- Listado: `https://supercell.com/en/games/clashofclans/blog/` → JSON en `<script id="__NEXT_DATA__">` → `props.pageProps.articles[]` (`title`, `linkUrl`, `publishDate`).
+- Artículo: `props.pageProps.openGraph.description` (resumen oficial) y `bodyCollection` (texto completo).
+- Forzar `response.encoding = "utf-8"` (el servidor no declara charset).
+
+### Telegram Bot API
+- Docs: https://core.telegram.org/bots/api. Long polling: `getUpdates` con `offset` y `timeout=30`; requiere que no haya webhook (`deleteWebhook`).
+- Límite de mensaje: 4096 caracteres. `sendChatAction(action="typing")` dura ~5 s.
+- Librerías evaluadas (no usadas): `python-telegram-bot` 22.8, `aiogram` 3.33.0.
+
+### Google Cloud desde Claude Code (MCP)
+- `@google-cloud/gcloud-mcp` (preview, https://github.com/googleapis/gcloud-mcp): expone `run_gcloud_command`; requiere gcloud CLI local autenticado. Instalado en `~/.local/google-cloud-sdk` y registrado con `claude mcp add gcloud -s local`.
+- Compute Engine remote MCP (`https://compute.googleapis.com/mcp`): sólo ciclo de vida/lectura de VMs (sin SSH ni metadata); requiere cliente OAuth propio.

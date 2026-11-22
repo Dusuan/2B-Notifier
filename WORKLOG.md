@@ -1,8 +1,41 @@
 # Registro de Trabajo (WORKLOG.md)
 
-Este documento mantiene un registro cronológico del progreso, decisiones tomadas y pendientes del proyecto **Pokenotify**.
+Este documento mantiene un registro cronológico del progreso, decisiones tomadas y pendientes del proyecto **2B-Notifier** (antes Pokenotify).
 
 > **[REGLA ESTRICTA]**: Cada sesión de trabajo debe actualizar el registro del día en curso. No agregar una nueva entrada si ya existe una para el día de hoy; editar/sobrescribir la entrada del día actual para reflejar el estado final acumulado de la sesión.
+
+---
+
+## Sesión: 2026-11-22 (Rebrand a 2B-Notifier + agente IA de Clash of Clans según HANDOFF.md)
+
+**Solicitud:** Analizar el proyecto, implementar el plan de `~/Downloads/HANDOFF.md` (agente CoC con Gemini free tier), renombrar Pokenotify → 2B-Notifier (bot + agente IA de notificaciones relevantes), guía de Google Cloud y conectar el MCP de Google Cloud.
+
+**Decisiones del usuario:** hosting en la VM e2-micro existente (no Cloud Run); reutilizar el bot de Telegram actual; renombrar también el repo de GitHub; docs en español.
+
+**Investigación verificada (no de memoria):** modelos Gemini estables con free tier (default `gemini-3.5-flash-lite`); API de `google-genai` 3.6.1 inspeccionada localmente; blog de Supercell sin RSS pero con JSON `__NEXT_DATA__`; dataset `chiefpansancolt/clash-of-clans-data` (commit `7afaa03`) con TH requerido por nivel; `python-telegram-bot` 22.8 / `aiogram` 3.33.0 evaluadas y descartadas a favor de Bot API directa con `requests`.
+
+**Qué implementamos:**
+- `tools/build_game_data.py` + `data/game_data.json` (120 unidades: héroes, tropas, hechizos, mascotas, máquinas, equipo).
+- `agent/`: `core.py` (bucle Gemini manual, máx 5 iteraciones, tope diario 400, manejo de 429), `tools.py` (6 herramientas), `upgrade_plan.py` + `priorities.json` (calculador determinista), `coc_api.py`, `news.py` (con push de posts nuevos), `store.py` (JSON en volumen `state/`).
+- `bot/telegram_bot.py`: long polling, allowlist, `/start /status /next /news /pokemon`, chat libre, "escribiendo…", partición de mensajes.
+- `main.py`: orquestador multi-hilo (monitor Pokémon + noticias + bot); el monitor respeta la preferencia de notificación y registra estado.
+- `cli.py`, `tests/test_upgrade_plan.py`, `tests/test_agent_loop.py` (13 tests OK).
+- Rebrand en loggers, `test_alert.py`, Docker (`python:3.12-slim`, servicio `notifier`, contenedor `2b-notifier`, volumen `notifier_state`), nuevo `.dockerignore` (evita copiar `.env` y `.venv` a la imagen), `.env.example`.
+- Docs: `CLAUDE.md`, `SPEC.md` (reescrito), `REFERENCES.md` (sección 7), `README.md` (guía de despliegue y llaves).
+
+**Archivos:** creados `agent/*`, `bot/*`, `tools/build_game_data.py`, `data/game_data.json`, `cli.py`, `tests/*`, `.dockerignore`; modificados `main.py`, `config.py`, `requirements.txt`, `Dockerfile`, `docker-compose.yml`, `.gitignore`, `.env.example`, `test_alert.py`, `alerts/*.py`, `scrapers/{amazon,costco,pricing}.py`, `CLAUDE.md`, `SPEC.md`, `REFERENCES.md`, `README.md`, `WORKLOG.md`.
+
+**Git:** commits `16466ed` (build datos), `d16ca48` (agente), `13dd62f` (bot + orquestador), `babbe0b` (rebrand), más el commit de docs de esta entrada. Repo GitHub renombrado a `Dusuan/2B-Notifier` (ver nota abajo). **No se hizo `git push`.**
+
+**Cambios fuera del repo:** gcloud CLI 594.0.1 instalado en `~/.local/google-cloud-sdk` (sin sudo, sin tocar rc de shell); MCP `gcloud` (`@google-cloud/gcloud-mcp`) registrado con `claude mcp add gcloud -s local` (en `~/.claude.json`, sólo este proyecto); `.venv/` local (ignorado por git).
+
+**No verificado / omitido:** build de la imagen Docker (Docker Desktop no estaba corriendo); llamadas reales a Gemini y a la API de CoC (no hay llaves locales). Bug preexistente sin tocar: `alerts/twilio_client.py` llama `config.validate_twilio()`, que no existe en `Config` (Twilio nunca se inicializa).
+
+**Próximos pasos:**
+1. `git push`, luego en la VM: `git remote set-url`, `git pull`, agregar `GEMINI_API_KEY`, `COC_API_TOKEN`, `COC_PLAYER_TAG` al `.env`, `docker-compose down && docker-compose up -d --build --remove-orphans`.
+2. `gcloud auth login` local para habilitar el MCP de Google Cloud.
+3. Crear alerta de presupuesto en Billing.
+4. Decidir si arreglar `validate_twilio`.
 
 ---
 
