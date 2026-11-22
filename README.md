@@ -95,6 +95,24 @@ Consola GCP → **Billing → Budgets & alerts → Create budget** → monto `$1
 
 ---
 
+## 🔁 CD automático (despliegue con sólo `git push`)
+
+La VM revisa GitHub cada 5 minutos (`cron` + `deploy/autodeploy.sh`, sin sudo y sin guardar credenciales de GCP en GitHub). Si `master` tiene commits nuevos:
+
+1. `git pull` (sólo fast-forward) → `docker compose build`
+2. **Corre los tests** dentro de la imagen nueva
+3. ✅ Pasan → `up -d --remove-orphans` y te llega a Telegram `🚀 2B-Notifier desplegado: <commit>`
+4. ❌ Fallan → vuelve al commit anterior, **el bot viejo sigue corriendo**, te llega `❌ ... falló` y no reintenta ese commit (sólo uno nuevo)
+
+Instalación (una vez, en la VM, después del primer despliegue manual):
+```bash
+cd ~/Pokenotify && bash deploy/install_autodeploy.sh
+tail -f ~/2b-notifier-deploy.log        # ver despliegues
+```
+Desactivar: `crontab -e` y borrar la línea de `autodeploy.sh`. Forzar un reintento de un commit fallido: `rm .deploy_failed`.
+
+---
+
 ## 🧪 Pruebas y desarrollo local
 
 ```bash

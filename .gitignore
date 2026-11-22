@@ -43,3 +43,4 @@ env/
 
 # Estado local del agente (perfil, caché, contador)
 state/
+.deploy_failed

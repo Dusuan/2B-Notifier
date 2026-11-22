@@ -22,18 +22,19 @@ Este documento mantiene un registro cronológico del progreso, decisiones tomada
 - `cli.py`, `tests/test_upgrade_plan.py`, `tests/test_agent_loop.py` (13 tests OK).
 - Rebrand en loggers, `test_alert.py`, Docker (`python:3.12-slim`, servicio `notifier`, contenedor `2b-notifier`, volumen `notifier_state`), nuevo `.dockerignore` (evita copiar `.env` y `.venv` a la imagen), `.env.example`.
 - Docs: `CLAUDE.md`, `SPEC.md` (reescrito), `REFERENCES.md` (sección 7), `README.md` (guía de despliegue y llaves).
+- **CD pull-based** (a pedido del usuario, sin CI en GitHub Actions): `deploy/autodeploy.sh` (cron cada 5 min en la VM: fetch → ff-merge → build → tests en la imagen nueva → `up -d`; rollback + marca `.deploy_failed` + aviso Telegram si falla) y `deploy/install_autodeploy.sh`. Imagen con nombre fijo `2b-notifier:latest` en `docker-compose.yml`. Simulado localmente con remoto git y `docker` falso: éxito, sin cambios, tests fallidos (rollback sin reintento) y recuperación tras fix.
 
 **Archivos:** creados `agent/*`, `bot/*`, `tools/build_game_data.py`, `data/game_data.json`, `cli.py`, `tests/*`, `.dockerignore`; modificados `main.py`, `config.py`, `requirements.txt`, `Dockerfile`, `docker-compose.yml`, `.gitignore`, `.env.example`, `test_alert.py`, `alerts/*.py`, `scrapers/{amazon,costco,pricing}.py`, `CLAUDE.md`, `SPEC.md`, `REFERENCES.md`, `README.md`, `WORKLOG.md`.
 
-**Git:** commits `16466ed` (build datos), `d16ca48` (agente), `13dd62f` (bot + orquestador), `babbe0b` (rebrand), más el commit de docs de esta entrada. Repo GitHub renombrado a `Dusuan/2B-Notifier` (ver nota abajo). **No se hizo `git push`.**
+**Git:** commits `16466ed` (build datos), `d16ca48` (agente), `13dd62f` (bot + orquestador), `babbe0b` (rebrand), `66aa99a` (docs), más el commit de CD de esta entrada. Repo GitHub renombrado a `Dusuan/2B-Notifier` (ver nota abajo). **No se hizo `git push`.**
 
-**Cambios fuera del repo:** gcloud CLI 594.0.1 instalado en `~/.local/google-cloud-sdk` (sin sudo, sin tocar rc de shell); MCP `gcloud` (`@google-cloud/gcloud-mcp`) registrado con `claude mcp add gcloud -s local` (en `~/.claude.json`, sólo este proyecto); `.venv/` local (ignorado por git).
+**Cambios fuera del repo:** `gcloud auth login` hecho por el usuario; `gcloud config set project pokebot-512120` (VM `pokenotify-worker`, us-central1-c, IP efímera 34.63.27.32). gcloud CLI 594.0.1 instalado en `~/.local/google-cloud-sdk` (sin sudo, sin tocar rc de shell); MCP `gcloud` (`@google-cloud/gcloud-mcp`) registrado con `claude mcp add gcloud -s local` (en `~/.claude.json`, sólo este proyecto); `.venv/` local (ignorado por git).
 
 **No verificado / omitido:** build de la imagen Docker (Docker Desktop no estaba corriendo); llamadas reales a Gemini y a la API de CoC (no hay llaves locales). Bug preexistente sin tocar: `alerts/twilio_client.py` llama `config.validate_twilio()`, que no existe en `Config` (Twilio nunca se inicializa).
 
 **Próximos pasos:**
 1. `git push`, luego en la VM: `git remote set-url`, `git pull`, agregar `GEMINI_API_KEY`, `COC_API_TOKEN`, `COC_PLAYER_TAG` al `.env`, `docker-compose down && docker-compose up -d --build --remove-orphans`.
-2. `gcloud auth login` local para habilitar el MCP de Google Cloud.
+2. En la VM: `bash deploy/install_autodeploy.sh` para activar el CD.
 3. Crear alerta de presupuesto en Billing.
 4. Decidir si arreglar `validate_twilio`.
 

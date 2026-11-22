@@ -5,6 +5,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    image: 2b-notifier:latest   # nombre fijo: deploy/autodeploy.sh corre los tests en esta imagen
     container_name: 2b-notifier
     restart: unless-stopped
     env_file:
